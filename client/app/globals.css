@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #0a0a0f;
+  --bg-secondary: #12121a;
+  --text-primary: #e4e4e7;
+  --text-secondary: #a1a1aa;
+  --accent: #6366f1;
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  margin: 0;
+  overflow: hidden;
+}
+
+#avatar-canvas {
+  width: 100vw;
+  height: 100vh;
+}
