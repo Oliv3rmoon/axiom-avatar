@@ -30,9 +30,19 @@ export default function Home() {
   const [transcript, setTranscript] = useState<Array<{ role: string; text: string }>>([]);
   const [micEnabled, setMicEnabled] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(false);
+  const [audioReady, setAudioReady] = useState(false);
 
   const wsRef = useRef<AvatarWebSocket | null>(null);
   const audioPlayerRef = useRef<AudioChunkPlayer | null>(null);
+
+  // Resume AudioContext on ANY user interaction (required by browser autoplay policy)
+  const ensureAudioReady = useCallback(async () => {
+    if (audioPlayerRef.current && !audioReady) {
+      await audioPlayerRef.current.resume();
+      setAudioReady(true);
+      console.log('[Audio] AudioContext resumed via user gesture');
+    }
+  }, [audioReady]);
 
   const handleMessage = useCallback((msg: ServerMessage) => {
     switch (msg.type) {
@@ -43,7 +53,6 @@ export default function Home() {
         setBlendShapes(msg.blendShapes);
         break;
       case 'gesture':
-        // In production, this triggers a Mixamo animation
         console.log('[App] Gesture:', msg.animation, 'intensity:', msg.intensity);
         break;
       case 'emotion':
@@ -53,13 +62,13 @@ export default function Home() {
         setIsSpeaking(true);
         setCurrentText(msg.text);
         setTranscript((prev) => [...prev, { role: 'assistant', text: msg.text }]);
+        // Audio should already be resumed from user's send click
         audioPlayerRef.current?.resume();
         break;
       case 'audio_chunk':
         audioPlayerRef.current?.addChunk(msg.data);
         break;
       case 'word_timing':
-        // Could drive lip-sync here
         break;
       case 'speaking_end':
         setIsSpeaking(false);
@@ -75,7 +84,6 @@ export default function Home() {
     }
   }, []);
 
-  // Connect WebSocket on mount
   useEffect(() => {
     const ws = new AvatarWebSocket(WS_URL, handleMessage, setStatus);
     wsRef.current = ws;
@@ -83,12 +91,14 @@ export default function Home() {
     return () => ws.disconnect();
   }, [handleMessage]);
 
-  const sendText = useCallback(() => {
+  const sendText = useCallback(async () => {
     if (!inputText.trim()) return;
+    // CRITICAL: Resume audio on user gesture (click/enter = user gesture)
+    await ensureAudioReady();
     wsRef.current?.send({ type: 'user_text', text: inputText.trim() });
     setTranscript((prev) => [...prev, { role: 'user', text: inputText.trim() }]);
     setInputText('');
-  }, [inputText]);
+  }, [inputText, ensureAudioReady]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -105,15 +115,13 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="relative w-screen h-screen overflow-hidden">
-      {/* 3D Avatar — full screen */}
+    <main className="relative w-screen h-screen overflow-hidden" onClick={ensureAudioReady}>
       <AvatarScene
         blendShapes={blendShapes}
         isSpeaking={isSpeaking}
         onAudioPlayerReady={onAudioPlayerReady}
       />
 
-      {/* Status bar — top left */}
       <div className="absolute top-4 left-4 flex items-center gap-4 bg-black/50 backdrop-blur-sm rounded-lg px-4 py-2">
         <div className="flex items-center gap-2">
           <div
@@ -131,12 +139,14 @@ export default function Home() {
         <div className="text-xs text-zinc-400">
           {emotion.emotion} ({(emotion.intensity * 100).toFixed(0)}%)
         </div>
+        {!audioReady && status === 'connected' && (
+          <div className="text-xs text-yellow-400 animate-pulse">Click anywhere to enable audio</div>
+        )}
       </div>
 
-      {/* Controls — top right */}
       <div className="absolute top-4 right-4 flex items-center gap-3 bg-black/50 backdrop-blur-sm rounded-lg px-4 py-2">
         <button
-          onClick={() => setMicEnabled(!micEnabled)}
+          onClick={() => { setMicEnabled(!micEnabled); ensureAudioReady(); }}
           className={`text-xs px-3 py-1 rounded ${
             micEnabled ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400'
           }`}
@@ -144,7 +154,7 @@ export default function Home() {
           {micEnabled ? 'Mic On' : 'Mic Off'}
         </button>
         <button
-          onClick={() => setCameraEnabled(!cameraEnabled)}
+          onClick={() => { setCameraEnabled(!cameraEnabled); ensureAudioReady(); }}
           className={`text-xs px-3 py-1 rounded ${
             cameraEnabled ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400'
           }`}
@@ -165,7 +175,6 @@ export default function Home() {
         />
       </div>
 
-      {/* Transcript overlay — bottom left */}
       <div className="absolute bottom-20 left-4 right-4 max-w-lg">
         <div className="bg-black/60 backdrop-blur-sm rounded-lg p-3 max-h-48 overflow-y-auto">
           {transcript.length === 0 ? (
@@ -187,7 +196,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Text input — bottom */}
       <div className="absolute bottom-4 left-4 right-4 flex gap-2 max-w-2xl mx-auto">
         <input
           type="text"
@@ -207,7 +215,6 @@ export default function Home() {
         </button>
       </div>
 
-      {/* Speaking indicator */}
       {isSpeaking && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 translate-y-32 pointer-events-none">
           <div className="flex items-center gap-1">
